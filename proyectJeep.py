@@ -1,31 +1,33 @@
 # Importación de modulos necesarios para el modelo de IA
 
 import pandas as pd
-import numpy as np
 import requests
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 
+# --- Configuración de la API ---
+API_KEY = 'iQ0EBCDsliXHWxOTfihUQj1W904h6XBunQQHhrMl'
+HEADERS = {'X-Api-Key': API_KEY}
 
+# Datos de los cuales, el modelo interpretará y aprenderá al usar números, gracias a LabelEncoder
 data = {
     'kilometraje': [15000, 120000, 45000, 200000, 80000, 30000],
     'año_vehiculo': [2022, 2015, 2019, 2010, 2017, 2021],
     'transmision': ['a', 'm', 'a', 'm', 'a', 'm'],
-    'cilindros':     [4, 4, 6, 8, 4, 3],
-    'estado_motor':  ['Normal', 'Fuga Aceite', 'Normal', 'Sobrecalentamiento', 'Ruido Valvulas', 'Normal'],
-    'estado_tren':   ['Alineado', 'Desgaste', 'Alineado', 'Holgura', 'Ruidos', 'Alineado'],
-    'estado_caja':   ['Suave', 'Golpes', 'Suave', 'Deslizamiento', 'Suave', 'Suave'],
+    'cilindros': [4, 4, 6, 8, 4, 3],
+    'estado_motor': ['Normal', 'Fuga Aceite', 'Normal', 'Sobrecalentamiento', 'Ruido Valvulas', 'Normal'],
+    'estado_tren': ['Alineado', 'Desgaste', 'Alineado', 'Holgura', 'Ruidos', 'Alineado'],
+    'estado_caja': ['Suave', 'Golpes', 'Suave', 'Deslizamiento', 'Suave', 'Suave'],
     'uso': ['Ciudad', 'Carretera', 'Mixto', 'Ciudad', 'Ciudad', 'Carretera'],
     'estado_riesgo': [0, 2, 0, 2, 1, 0] 
-} #Datos de los cuales, el modelo interpretará y aprenderá al usar números, gracias a LabelEncoder
-
+}
 # Convertimos a DataFrame (tabla)
 df = pd.DataFrame(data)
 
-le_uso = LabelEncoder()
-le_motor = LabelEncoder()
+le_uso = LabelEncoder(); 
+le_motor = LabelEncoder(); 
 le_tren = LabelEncoder()
-le_caja = LabelEncoder()
+le_caja = LabelEncoder(); 
 le_trans = LabelEncoder()
 
 df['estado_motor_n'] = le_motor.fit_transform(df['estado_motor'])
@@ -41,128 +43,83 @@ y = df['estado_riesgo']
 modelo = RandomForestClassifier(n_estimators=100, random_state=42)
 modelo.fit(X, y)
 
-def obtener_datos_api(marca, modelo_auto, año):
-    """Consulta la API Ninjas para obtener cilindros y transmisión"""
-    api_url = 'https://api.api-ninjas.com/v1/cars'
-    mi_api_key = 'iQ0EBCDsliXHWxOTfihUQj1W904h6XBunQQHhrMl' 
+def buscar_sugerencias(tipo, valor, marca_filtro=None, modelo_filtro=None):
+    """Consulta la API para Marcas, Modelos o Años"""
+    params = {tipo: valor}
     
-    headers = {'X-Api-Key': mi_api_key}
-    params = {'make': marca, 'model': modelo_auto, 'year': año}
+    if marca_filtro: params['make'] = marca_filtro
+    if modelo_filtro: params['model'] = modelo_filtro
 
-    print(f"Buscando ficha técnica de: {marca} {modelo_auto} ({año})...")
-    
     try:
-        response = requests.get(api_url, headers=headers, params=params, timeout=5)
-
-        # Mostrar estado HTTP para diagnóstico
-        if response.status_code != 200:
-            print(f"Respuesta API no OK: {response.status_code} - {response.text[:300]}")
-            print("No se pudo conectar con la API. Usando valores genéricos.")
-            return None
-
-        # Intentamos decodificar JSON con manejo explícito de errores
-        try:
-            datos = response.json()
-        except ValueError as e:
-            print(f"Error decodificando JSON: {e}")
-            print(f"Respuesta cruda de la API (primeros 300 chars): {response.text[:300]!r}")
-            print("No se pudo procesar la respuesta JSON. Usando valores genéricos.")
-            return None
-
-        if datos and len(datos) > 0:
-            coche = datos[0]
-            return {
-                'cilindros': coche.get('cylinders', 4), # Si no trae dato, asume 4
-                'transmision': coche.get('transmission', 'a') # Si no trae, asume 'a'
-            }
-
-    except requests.RequestException as e:
-        print(f"Error de conexión API: {e}")
-
-    print("No se pudo conectar con la API. Usando valores genéricos.")
-    return None
+        res = requests.get('https://api.api-ninjas.com/v1/cars', headers=HEADERS, params=params, timeout=2)
+        
+        if res.status_code == 200:
+            datos = res.json()
+            # Si el tipo es 'year', extraemos el campo 'year' de la respuesta
+            key = tipo 
+            
+            # Extraer, convertir a string (para el Combobox), eliminar duplicados y ordenar descendente
+            resultados = sorted(list(set([str(c.get(key)) for c in datos])), reverse=True)
+            
+            return resultados[:5] # Retornamos los 5 años más recientes encontrados
+    except:
+        pass
+    return []
 
 def analizar_vehiculo_completo(marca, modelo_auto, año, km, uso, motor, tren, caja):
-    print(f"\n--- Iniciando Diagnóstico: {marca} {modelo_auto} ---")
-
-    # 1. Obtener datos técnicos de la API (o usar valores por defecto)
-    info_api = obtener_datos_api(marca, modelo_auto, año)
-    
-    if info_api:
-        cilindros = info_api['cilindros']
-        transmision = info_api['transmision']
-        print(f"Datos Técnicos API: {cilindros} Cilindros | Transmisión: {transmision}")
-    else:
-        
-        # Si no hay internet, asumimos un estándar (4 cilindros, automático)
-        cilindros = 4
-        transmision = 'a'
-        print(" Usando configuración estándar (4 Cil, Auto)")
-
-    # 2. Traducir datos para la IA
+    msg_api = ""
     try:
-        # Convertimos texto a número usando los traductores entrenados
-        uso_val = le_uso.transform([uso])[0]
-        motor_val = le_motor.transform([motor])[0]
-        tren_val = le_tren.transform([tren])[0]
-        caja_val = le_caja.transform([caja])[0]
-        
-        # Mapeo manual para transmisión si la API devuelve algo raro
-        # Aseguramos que sea 'a' o 'm' porque eso es lo que aprendió la IA
-        if 'm' in transmision.lower(): 
-            trans_clean = 'm'
-        else: 
-            trans_clean = 'a'
-        trans_val = le_trans.transform([trans_clean])[0]
-        
-    except ValueError as e:
-        print(f" Error: Has ingresado una categoría que la IA no conoce: {e}")
-        print("Asegúrate de usar palabras exactas (ej: 'Fuga Aceite', no 'Bote de aceite')")
-        return
+        res = requests.get('https://api.api-ninjas.com/v1/cars', headers=HEADERS, 
+                           params={'make': marca, 'model': modelo_auto, 'year': año}, timeout=3)
+        if res.status_code == 200 and res.json():
+            coche = res.json()[0]
+            cilindros = coche.get('cylinders', 4)
+            transmision = coche.get('transmission', 'a')
+            msg_api = f"✅ DATOS TÉCNICOS (API): {cilindros} Cilindros | Transmisión: {transmision.upper()}"
+        else:
+            cilindros, transmision = 4, 'a'
+            msg_api = "⚠️ DATOS TÉCNICOS: No encontrados, usando estándar. \n" \
+            "4 Cilindros | Transmisión: Auto"
+    except:
+        cilindros, transmision = 4, 'a'
+        msg_api = "🌐 DATOS TÉCNICOS: Sin conexión, usando estándar. \n" \
+        "4 Cilindros | Transmisión: Auto"
+
+    # --- Lógica de predicción ---
+    uso_val = le_uso.transform([uso])[0]
+    motor_val = le_motor.transform([motor])[0]
+    tren_val = le_tren.transform([tren])[0]
+    caja_val = le_caja.transform([caja])[0]
+    trans_clean = 'm' if 'm' in transmision.lower() else 'a'
+    trans_val = le_trans.transform([trans_clean])[0]
     
-    datos_lista = [[km, año, cilindros, trans_val, motor_val, tren_val, caja_val, uso_val]]
-    datos_entrada = pd.DataFrame(datos_lista, columns=X.columns)
-    
-    
-    # PREDICCIÓN
+    datos_entrada = pd.DataFrame([[km, año, cilindros, trans_val, motor_val, tren_val, caja_val, uso_val]], columns=X.columns)
     prediccion = modelo.predict(datos_entrada)[0]
-    probabilidad = modelo.predict_proba(datos_entrada).max() * 100
+    prob = modelo.predict_proba(datos_entrada).max() * 100
     
-    # INTERPRETACIÓN (Sistema de Apoyo a Decisiones)
-    if prediccion == 0:
-        resultado = "🟢 ESTADO SALUDABLE. Mantenimiento preventivo normal a largo plazo."
-    elif prediccion == 1:
-        resultado = "🟡 ALERTA MEDIA. Se detectan patrones de desgaste. Revisión recomendada a mediano plazo."
-    else:
-        resultado = "🔴 RIESGO CRÍTICO (CORTO PLAZO). Alta probabilidad de falla inminente."
-        
-    print(f"Estado Motor: {motor} | Caja: {caja}")
-    print(f"Diagnóstico IA: {resultado}")
-    print(f"Certeza: {probabilidad:.1f}%")
-    print("------------------------------------------------")
-
-# Caso A: Un Toyota Corolla (La API dirá que es Automático/Manual y sus cilindros)
-# Notarás que NO le pasamos cilindros ni transmisión, ¡el sistema lo busca solo!
-analizar_vehiculo_completo(
-    marca="Toyota", 
-    modelo_auto="Corolla", 
-    año=2015, 
-    km=120000, 
-    uso="Carretera", 
-    motor="Fuga Aceite", 
-    tren="Desgaste", 
-    caja="Golpes"
-)
-
-# Caso B: Un carro más nuevo y sano
-analizar_vehiculo_completo(
-    marca="Ford", 
-    modelo_auto="Fiesta", 
-    año=2019, 
-    km=45000, 
-    uso="Mixto", 
-    motor="Normal", 
-    tren="Alineado", 
-    caja="Suave"
-)
+    diag = [
+        "🟢 ESTADO SALUDABLE. Mantenimiento preventivo normal \n a largo plazo.",
+        "🟡 ALERTA MEDIA. Se detectan patrones de desgaste. Revisión recomendada a mediano plazo.", 
+        "🔴 RIESGO CRÍTICO. Alta probabilidad de falla inminente."
+    ][prediccion]
+    
+    # --- CONSTRUCCIÓN DEL RESUMEN FINAL ---
+    resumen_usuario = (
+        f"📋 RESUMEN DEL VEHÍCULO:\n"
+        f"• Vehículo: {marca.upper()} {modelo_auto.upper()} ({año})\n"
+        f"• Kilometraje: {km:,} km\n"
+        f"• Uso reportado: {uso}\n"
+        f"------------------------------------------\n"
+        f"🔍 ESTADOS REPORTADOS:\n"
+        f"• Motor: {motor}\n"
+        f"• Tren Delantero: {tren}\n"
+        f"• Caja de Cambios: {caja}\n"
+        f"------------------------------------------\n"
+        f"{msg_api}\n"
+        f"------------------------------------------\n"
+        f"🤖 DIAGNÓSTICO IA:\n{diag}\n"
+        f"🎯 Certeza del análisis: {prob:.1f}%"
+    )
+    
+    return resumen_usuario
 
